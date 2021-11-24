@@ -19,6 +19,8 @@ import paddle.nn.functional as F
 from paddleseg.models import layers
 from paddleseg.cvlibs import manager
 from paddleseg.utils import utils
+import paddleseg.transforms.functional as F1
+import numpy as np
 
 
 @manager.MODELS.add_component
@@ -33,7 +35,7 @@ class SFNet(nn.Layer):
     Args:
         num_classes (int): The unique number of target classes.
         backbone (Paddle.nn.Layer): Backbone network, currently support Resnet50/101.
-        backbone_indices (tuple): Four values in the tuple indicate the indices of output of backbone.
+        索引backbone_indices (tuple): Four values in the tuple indicate the indices of output of backbone.
         enable_auxiliary_loss (bool, optional): A bool value indicates whether adding auxiliary loss. Default: False.
         align_corners (bool, optional): An argument of F.interpolate. It should be set to False when the feature size is even,
             e.g. 1024x512, otherwise it is True, e.g. 769x769. Default: False.
@@ -84,6 +86,12 @@ class SFNet(nn.Layer):
                 mode='bilinear',
                 align_corners=self.align_corners) for logit in logit_list
         ]
+        pre_edge_masks = []
+        batch_size = paddle.shape(x)[0]
+        for i in range(batch_size):# batch_size
+            pre_edge_mask = F1.mask_to_binary_edge(np.argmax(logit_list[0][i].numpy(), axis=0), radius=2, num_classes=19)
+            pre_edge_masks.append(pre_edge_mask)
+        logit_list.append(paddle.to_tensor(pre_edge_masks, dtype='float32'))
         return logit_list
 
     def init_weight(self):

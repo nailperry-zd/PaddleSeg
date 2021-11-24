@@ -12,6 +12,7 @@ model:
   backbone_indices: [0, 1, 2, 3]
 
 train_dataset:
+  edge: True
   transforms:
     - type: ResizeStepScaling
       min_scale_factor: 0.5
@@ -26,10 +27,18 @@ train_dataset:
       saturation_range: 0.4
     - type: Normalize
 
+#loss:
+#  types:
+#    - type: OhemCrossEntropyLoss
+#  coef: [1]
+
 loss:
   types:
     - type: OhemCrossEntropyLoss
-  coef: [1]
+    - type: BCELoss
+      weight: 'dynamic'
+      edge_label: True
+  coef: [1,25]
 
 optimizer:
   type: sgd

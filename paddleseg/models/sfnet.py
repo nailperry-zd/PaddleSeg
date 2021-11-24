@@ -22,6 +22,8 @@ from paddleseg.utils import utils
 import paddleseg.transforms.functional as F1
 import numpy as np
 import time
+from concurrent.futures import ThreadPoolExecutor
+import threading
 
 
 @manager.MODELS.add_component
@@ -51,6 +53,7 @@ class SFNet(nn.Layer):
                  align_corners=False,
                  pretrained=None):
         super(SFNet, self).__init__()
+        self.num_classes = num_classes
         self.backbone = backbone
         self.backbone_indices = backbone_indices
         self.in_channels = [
@@ -91,10 +94,16 @@ class SFNet(nn.Layer):
         if self.training:
             with paddle.no_grad():  # 关闭梯度计算
                 start = time.time()
-                num_classes = paddle.shape(logit_list[0])[1]
                 final_label = np.argmax(logit_list[0].numpy(), axis=1)
                 batch_size = final_label.shape[0]
-                pre_edge_masks = [F1.mask_to_binary_edge(final_label[i], radius=2, num_classes=num_classes) for i in range(batch_size)]
+                # 创建一个包含batch_size条线程的线程池
+                with ThreadPoolExecutor(max_workers=batch_size) as pool:
+                    # 使用线程执行map计算
+                    # 后面元组有batch_size个元素，因此程序启动batch_size条线程来执行action函数
+                    results = pool.map(self.action, (final_label[i] for i in range(batch_size)))
+                    pre_edge_masks = []
+                    for r in results:
+                        pre_edge_masks.append(r)
                 end = time.time()
                 print('edge-mask提取耗时', end - start)# 秒
                 logit_list.append(paddle.to_tensor(pre_edge_masks, dtype='float32'))
@@ -104,6 +113,9 @@ class SFNet(nn.Layer):
         if self.pretrained is not None:
             utils.load_entire_model(self, self.pretrained)
 
+    # 定义一个准备作为线程任务的函数
+    def action(self, final_label_i):
+        return F1.mask_to_binary_edge(final_label_i, radius=2, num_classes=self.num_classes)
 
 class SFNetHead(nn.Layer):
     """

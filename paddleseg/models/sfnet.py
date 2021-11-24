@@ -21,6 +21,7 @@ from paddleseg.cvlibs import manager
 from paddleseg.utils import utils
 import paddleseg.transforms.functional as F1
 import numpy as np
+import time
 
 
 @manager.MODELS.add_component
@@ -86,12 +87,17 @@ class SFNet(nn.Layer):
                 mode='bilinear',
                 align_corners=self.align_corners) for logit in logit_list
         ]
-        pre_edge_masks = []
-        batch_size = paddle.shape(x)[0]
-        for i in range(batch_size):# batch_size
-            pre_edge_mask = F1.mask_to_binary_edge(np.argmax(logit_list[0][i].numpy(), axis=0), radius=2, num_classes=19)
-            pre_edge_masks.append(pre_edge_mask)
-        logit_list.append(paddle.to_tensor(pre_edge_masks, dtype='float32'))
+
+        if self.training:
+            with paddle.no_grad():  # 关闭梯度计算
+                start = time.time()
+                num_classes = paddle.shape(logit_list[0])[1]
+                final_label = np.argmax(logit_list[0].numpy(), axis=1)
+                batch_size = final_label.shape[0]
+                pre_edge_masks = [F1.mask_to_binary_edge(final_label[i], radius=2, num_classes=num_classes) for i in range(batch_size)]
+                end = time.time()
+                print('edge-mask提取耗时', end - start)# 秒
+                logit_list.append(paddle.to_tensor(pre_edge_masks, dtype='float32'))
         return logit_list
 
     def init_weight(self):

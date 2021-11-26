@@ -202,13 +202,15 @@ class SqueezeBodyEdge(nn.Layer):
     def forward(self, x):# 2x256x104x104
         size = paddle.shape(x)[2:]# 104x104
         seg_down = self.down(x)#2x256x26x26
-        seg_down = F.interpolate(
+        seg_down_up_sampled = F.interpolate(
             seg_down,
             size=size,
             mode='bilinear',
             align_corners=self.align_corners)#2x256x104x104
-        flow = self.flow_make(paddle.concat([x, seg_down], axis=1))#2x2x104x104
-        seg_flow_warp = self.flow_warp(x, flow, size)#2x256x104x104
+        flow = self.flow_make(paddle.concat([x, seg_down_up_sampled], axis=1))#2x2x104x104
+        # seg_flow_warp = self.flow_warp(x, flow, size)#2x256x104x104
+        # 改变对齐方向
+        seg_flow_warp = self.flow_warp(seg_down_up_sampled, flow, size)#2x256x104x104
         seg_edge = x - seg_flow_warp#2x256x104x104
         return seg_flow_warp, seg_edge
 

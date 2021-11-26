@@ -67,20 +67,20 @@ class DecoupledSegNet(nn.Layer):
         self.pretrained = pretrained
         self.init_weight()
 
-    def forward(self, x):
-        feat_list = self.backbone(x)
-        logit_list = self.head(feat_list)
-
+    def forward(self, x):#2x3x832x832
+        feat_list = self.backbone(x)# [2x256x208x208,2x512x104x104,2x1024x104x104,2x2048x104x104]
+        logit_list = self.head(feat_list)#[2x19x208x208,2x19x104x104,2x1x108x108]
+        # [seg_final_out, seg_body_out, seg_edge_out]
         seg_logit, body_logit, edge_logit = [
             F.interpolate(
                 logit,
-                paddle.shape(x)[2:],
+                paddle.shape(x)[2:],#832x832
                 mode='bilinear',
                 align_corners=self.align_corners) for logit in logit_list
         ]
 
         if self.training:
-            return [seg_logit, body_logit, edge_logit, (seg_logit, edge_logit)]
+            return [seg_logit, body_logit, edge_logit, (seg_logit, edge_logit)]#[2x19x832x832,2x19x832x832,2x1x832x832,(2x19x832x832,2x1x832x832)]
         return [seg_logit]
 
     def init_weight(self):
@@ -107,7 +107,7 @@ class DecoupledSegNetHead(nn.Layer):
     def __init__(self, num_classes, backbone_indices, backbone_channels,
                  aspp_ratios, aspp_out_channels, align_corners):
         super().__init__()
-        self.backbone_indices = backbone_indices
+        self.backbone_indices = backbone_indices#【0，3】
         self.align_corners = align_corners
         self.aspp = layers.ASPPModule(
             aspp_ratios=aspp_ratios,
@@ -150,41 +150,41 @@ class DecoupledSegNetHead(nn.Layer):
                 bias_attr=False),
             nn.Conv2D(256, num_classes, kernel_size=1, bias_attr=False))
 
-    def forward(self, feat_list):
-        fine_fea = feat_list[self.backbone_indices[0]]
+    def forward(self, feat_list):#[2x256x208x208,2x512x104x104,2x1024x104x104,2x2048x104x104]
+        fine_fea = feat_list[self.backbone_indices[0]]#0, 2x256x208x208
         fine_size = paddle.shape(fine_fea)
-        x = feat_list[self.backbone_indices[1]]
-        aspp = self.aspp(x)
+        x = feat_list[self.backbone_indices[1]]#3,2x2048x104x104
+        aspp = self.aspp(x)# 2x256x104x104
 
         # decoupled
-        seg_body, seg_edge = self.squeeze_body_edge(aspp)
+        seg_body, seg_edge = self.squeeze_body_edge(aspp)#2x256x104x104
         # Edge presevation and edge out
-        fine_fea = self.bot_fine(fine_fea)
+        fine_fea = self.bot_fine(fine_fea)#2x48x208x208
         seg_edge = F.interpolate(
             seg_edge,
             fine_size[2:],
             mode='bilinear',
-            align_corners=self.align_corners)
-        seg_edge = self.edge_fusion(paddle.concat([seg_edge, fine_fea], axis=1))
-        seg_edge_out = self.edge_out(seg_edge)
-        seg_edge_out = self.sigmoid_edge(seg_edge_out)  # seg_edge output
-        seg_body_out = self.dsn_seg_body(seg_body)  # body out
+            align_corners=self.align_corners)#2x256x208x208
+        seg_edge = self.edge_fusion(paddle.concat([seg_edge, fine_fea], axis=1))#2x256x208x208
+        seg_edge_out = self.edge_out(seg_edge)#2x1x208x208
+        seg_edge_out = self.sigmoid_edge(seg_edge_out)  # seg_edge output 2x1x208x208
+        seg_body_out = self.dsn_seg_body(seg_body)  # body out 2x19x104x104
 
         # seg_final out
         seg_out = seg_edge + F.interpolate(
             seg_body,
             fine_size[2:],
             mode='bilinear',
-            align_corners=self.align_corners)
+            align_corners=self.align_corners)#2x256x208x208
         aspp = F.interpolate(
             aspp,
             fine_size[2:],
             mode='bilinear',
-            align_corners=self.align_corners)
-        seg_out = paddle.concat([aspp, seg_out], axis=1)
-        seg_final_out = self.final_seg(seg_out)
+            align_corners=self.align_corners)#2x256x208x208
+        seg_out = paddle.concat([aspp, seg_out], axis=1)#2x512x208x208
+        seg_final_out = self.final_seg(seg_out)#2x19x208x208
 
-        return [seg_final_out, seg_body_out, seg_edge_out]
+        return [seg_final_out, seg_body_out, seg_edge_out]#[2x19x208x208,2x19x104x104, 2x1x208x208]
 
 
 class SqueezeBodyEdge(nn.Layer):
@@ -199,17 +199,17 @@ class SqueezeBodyEdge(nn.Layer):
         self.flow_make = nn.Conv2D(
             inplane * 2, 2, kernel_size=3, padding='same', bias_attr=False)
 
-    def forward(self, x):
-        size = paddle.shape(x)[2:]
-        seg_down = self.down(x)
+    def forward(self, x):# 2x256x104x104
+        size = paddle.shape(x)[2:]# 104x104
+        seg_down = self.down(x)#2x256x26x26
         seg_down = F.interpolate(
             seg_down,
             size=size,
             mode='bilinear',
-            align_corners=self.align_corners)
-        flow = self.flow_make(paddle.concat([x, seg_down], axis=1))
-        seg_flow_warp = self.flow_warp(x, flow, size)
-        seg_edge = x - seg_flow_warp
+            align_corners=self.align_corners)#2x256x104x104
+        flow = self.flow_make(paddle.concat([x, seg_down], axis=1))#2x2x104x104
+        seg_flow_warp = self.flow_warp(x, flow, size)#2x256x104x104
+        seg_edge = x - seg_flow_warp#2x256x104x104
         return seg_flow_warp, seg_edge
 
     def flow_warp(self, input, flow, size):

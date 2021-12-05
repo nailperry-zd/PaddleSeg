@@ -21,6 +21,7 @@ from PIL import Image
 from paddleseg.cvlibs import manager
 from paddleseg.transforms import Compose
 import paddleseg.transforms.functional as F
+import time
 
 
 @manager.DATASETS.add_component
@@ -154,8 +155,17 @@ class Dataset(paddle.io.Dataset):
         else:
             im, label = self.transforms(im=image_path, label=label_path)
             if self.edge:
-                edge_mask = F.mask_to_binary_edge(
-                    label, radius=2, num_classes=self.num_classes)
+                edge_mask_path = str(label_path[0:label_path.rindex('.')]) + '_edge_mask.png'
+                if os.path.exists(edge_mask_path):
+                    edge_mask = np.asarray(Image.open(edge_mask_path))
+                    edge_mask = edge_mask[np.newaxis, :, :]
+                else:
+                    start = time.time()
+                    edge_mask = F.mask_to_binary_edge(
+                        label, radius=2, num_classes=self.num_classes)
+                    # 保存edge_mask
+                    Image.fromarray(edge_mask[0]).save(edge_mask_path)
+                    print('dataset 提取edge mask耗时', time.time() - start)
                 return im, label, edge_mask
             else:
                 return im, label

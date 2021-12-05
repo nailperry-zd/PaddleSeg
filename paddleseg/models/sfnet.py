@@ -77,9 +77,15 @@ class SFNet(nn.Layer):
             fpn_inplanes=fpn_inplanes,
             fpn_dim=fpn_dim,
             enable_auxiliary_loss=self.enable_auxiliary_loss)
+        self.final_fusion = layers.ConvBNReLU(
+            in_channels=self.num_classes + 1,
+            out_channels=19,
+            kernel_size=1,
+            bias_attr=False)
         self.init_weight()
 
-    def forward(self, x):
+    def forward(self, x, hed=None):
+        start = time.time()
         feats = self.backbone(x)
         feats = [feats[i] for i in self.backbone_indices]
         logit_list = self.head(feats)
@@ -90,23 +96,19 @@ class SFNet(nn.Layer):
                 mode='bilinear',
                 align_corners=self.align_corners) for logit in logit_list
         ]
+        mid = time.time()
+        print('sfnet forward耗时', mid - start)  # 秒
 
-        if self.training:
+        if self.training and hed is not None:
             with paddle.no_grad():  # 关闭梯度计算
-                start = time.time()
-                final_label = np.argmax(logit_list[0].numpy(), axis=1)
-                batch_size = final_label.shape[0]
-                # 创建一个包含batch_size条线程的线程池
-                with ThreadPoolExecutor(max_workers=batch_size) as pool:
-                    # 使用线程执行map计算
-                    # 后面元组有batch_size个元素，因此程序启动batch_size条线程来执行action函数
-                    results = pool.map(self.action, (final_label[i] for i in range(batch_size)))
-                    pre_edge_masks = []
-                    for r in results:
-                        pre_edge_masks.append(r)
-                end = time.time()
-                print('edge-mask提取耗时', end - start)# 秒
-                logit_list.append(paddle.to_tensor(pre_edge_masks, dtype='float32'))
+                pre_edges = hed(x.astype('float32'))
+                # post_pre_edges = paddle.clip(pre_edges, 0, 1)
+                logit_list.append(pre_edges)
+                print('edge-mask提取耗时', time.time() - mid)# 秒
+            # post_pre_edges = self.edge_fusion(pre_edges)
+            final_logit = paddle.concat((logit_list[0], pre_edges), axis=1)
+            logit_list[0] = self.final_fusion(final_logit)
+            # logit_list.append(final_logit)
         return logit_list
 
     def init_weight(self):

@@ -77,11 +77,7 @@ class SFNet(nn.Layer):
             fpn_inplanes=fpn_inplanes,
             fpn_dim=fpn_dim,
             enable_auxiliary_loss=self.enable_auxiliary_loss)
-        self.final_fusion = layers.ConvBNReLU(
-            in_channels=self.num_classes + 1,
-            out_channels=19,
-            kernel_size=1,
-            bias_attr=False)
+        self.edge_scale = paddle.fluid.layers.create_parameter(shape=[1, self.num_classes, 1, 1], dtype='float32', attr=nn.initializer.Constant(value=1.))
         self.init_weight()
 
     def forward(self, x, hed=None):
@@ -97,17 +93,16 @@ class SFNet(nn.Layer):
                 align_corners=self.align_corners) for logit in logit_list
         ]
         mid = time.time()
-        print('sfnet forward耗时', mid - start)  # 秒
+        # print('sfnet forward耗时', mid - start)  # 秒
 
         if self.training and hed is not None:
             with paddle.no_grad():  # 关闭梯度计算
                 pre_edges = hed(x.astype('float32'))
                 # post_pre_edges = paddle.clip(pre_edges, 0, 1)
                 logit_list.append(pre_edges)
-                print('edge-mask提取耗时', time.time() - mid)# 秒
-            # post_pre_edges = self.edge_fusion(pre_edges)
-            final_logit = paddle.concat((logit_list[0], pre_edges), axis=1)
-            logit_list[0] = self.final_fusion(final_logit)
+                # print('edge-mask提取耗时', time.time() - mid)# 秒
+            post_pre_edges = self.edge_scale * pre_edges
+            logit_list[0] += post_pre_edges
             # logit_list.append(final_logit)
         return logit_list
 
